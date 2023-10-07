@@ -12,21 +12,25 @@
 # Requires a valid tag/release name. See https://github.com/prime-properties/provisioning/releases
 
 # BEGIN: GLOBALS
-GITHUB_TOKEN="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"
-ARCHIVE_NAME="archive_$(date +%s)"
-TAG_NAME=
+TIMESTAMP="$(date +%s)"
+WORKING_DIRECTORY="${HOME}/tmp_${TIMESTAMP}"
+ARCHIVE_FILE="${WORKING_DIRECTORY}/archive_${TIMESTAMP}"
+TOKEN= # Github PAT token
+TAG=
 # END: GLOBALS
 
 # BEGIN: FUNCTIONS
 Prompt_User (){
   set -o posix # use POSIX mode so SIGINT can be traped when looping a read command
   echo "This script will download a provisioning release for the prime properties development server."
-  echo "You will need a proper GitHub access token and the tag/release name"
+  echo "You will need a proper GitHub access token and tag/release name"
   echo "For tag/release names see: https://github.com/prime-properties/provisioning/releases"
-  echo "The scripts will be downloaded to ~/.provisioning"
+  echo "The scripts will be downloaded to ~/.provisioning-<tag/release>"
+  echo "Where <tag/release> is equal to the valid tag/release name you entered"
   while true; do
-    read -p "GitHub Access token: " GITHUB_TOKEN || exit
-    case $TAG_NAME in
+    echo -n "GitHub Access token: "
+    read -s TOKEN || exit
+    case $TOKEN in
         "")echo "This cannot be empty";;
         [Cc]*) exit;;
         * ) if [[ $t =~ '^ *$' ]]; then 
@@ -37,10 +41,10 @@ Prompt_User (){
         ;;
     esac
   done
-  echo -n
+  echo
     while true; do
-    read -p "Tag/Release name (something like v0.0.1-dev): " TAG_NAME || exit
-    case $TAG_NAME in
+    read -p "Tag/Release name (something like v0.0.1-dev): " TAG || exit
+    case $TAG in
         "")echo "This cannot be empty";;
         [Cc]*) exit;;
         * ) if [[ $t =~ '^ *$' ]]; then 
@@ -51,34 +55,45 @@ Prompt_User (){
         ;;
     esac
   done
-  echo -n
+  echo
   set +o posix # return to default mode
 }
 # END:  FUNCTIONS
 
+# TODO: change this to use a deploy key since the provisioning repo is from an organization.
+# Access should be for just reading the repo. Not full private repo scope for a user.
+# It is not very secure to send out the pat token like this
 Download_Archive() {
+  mkdir -p "${WORKING_DIRECTORY}"
   curl -L \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $GHA_TOKEN" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "https://github.com/prime-properties/provisioning/archive/refs/tags/${TAG_NAME}.tar.gz" > "~/${ARCHIVE_NAME}"
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/prime-properties/provisioning/tarball/${TAG}" \
+  > "${ARCHIVE_FILE}"
 }
 
-Untar_Archive() {
-  tar -xvf "~/${ARCHIVE_NAME}"
+Extract_Archive() {
+  local dest="${HOME}/.provisioning-${TAG}"
+  mkdir -p "${dest}"
+  tar -xvf "${ARCHIVE_FILE}" --strip-components=1 --directory="$dest"
+  [[ $? -eq 0 ]] &&
+  echo -e "\nSUCCESS!. The scripts have been downloaded to ${dest}"
 }
 
 Cleanup () {
   trap '' 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
-  # copy ~/${ARCHIVE_NAME} to .provisioning
-  # delete ~/${ARCHIVE_NAME} and the folder it extracted
+  [[ -d "${WORKING_DIRECTORY}" && "${WORKING_DIRECTORY}" != "${HOME}" ]] && 
+  rm -rf "${WORKING_DIRECTORY}"
 }
 
 Main() {
-  echo
+  Prompt_User &&
+  Download_Archive &&
+  Extract_Archive
 }
 
-# Trap all signals that would terminate the program so we can cleanup any mess we made. 
+# Trap all signals that would terminate the program so we can cleanup any mess.
 # This trap is removed in the cleanup function so signals are not caught twice.
 trap Cleanup 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
 
