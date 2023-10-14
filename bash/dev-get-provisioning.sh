@@ -33,7 +33,7 @@ Prompt_User (){
     case $TOKEN in
         "")echo "This cannot be empty";;
         [Cc]*) exit;;
-        * ) if [[ $t =~ '^ *$' ]]; then 
+        * ) if [[ $TOKEN =~ '^ *$' ]]; then 
               echo "This cannot be blank"
             else 
               break; 
@@ -47,7 +47,7 @@ Prompt_User (){
     case $TAG in
         "")echo "This cannot be empty";;
         [Cc]*) exit;;
-        * ) if [[ $t =~ '^ *$' ]]; then 
+        * ) if [[ $TAG =~ '^ *$' ]]; then 
               echo "This cannot be blank"
             else 
               break; 
