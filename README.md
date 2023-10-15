@@ -8,3 +8,6 @@ bash <(curl -s https://raw.githubusercontent.com/prime-properties/scripts/main/b
 ```
 Enter your Github Personal Access Token
 Enter the tag/release name of the source coude you want to download
+
+### Misc reference
+https://www.toptal.com/laravel/laravel-zero-downtime-deployment
