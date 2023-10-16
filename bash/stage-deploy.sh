@@ -15,10 +15,11 @@
 # BEGIN: INITIALIZATION CODE, set traps, define and set globals, etc
 set -Eeou pipefail
 trap Cleanup 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
-SITE_LOC="/var/www/prime-properties/test-site"
-TIMESTAMP="$(date +%s)"
-WORKING_DIRECTORY="${HOME}/tmp_${TIMESTAMP}"
-ARCHIVE_FILE="${WORKING_DIRECTORY}/archive_${TIMESTAMP}"
+SITE_NAME="test-app"
+SITE_DIR="/opt/laravel/${SITE_NAME}"
+SITE_SYMLINK="/var/www/prime-properties/${SITE_NAME}"
+#TIMESTAMP="$(date +%s)"
+ARCHIVE_FILE="${SITE_DIR}/site_archive_${TIMESTAMP}"
 PAT_TOKEN=
 GIT_TAG=
 # END: INITIALIZATION CODE
@@ -26,17 +27,6 @@ GIT_TAG=
 # BEGIN: FUNCTIONS
 Prompt_User (){
   set -o posix # use POSIX mode so SIGINT can be traped when looping a read command
-  if [[ -d "${SITE_LOC}" ]]; then
-    echo "${SITE_LOC} already exists, this will be overitten completely."
-    while true; do
-      read -p "Proceed? [y]/[n]? " yn
-      case $yn in
-          [Yy]* ) break;;
-          [Nn]* ) echo "Script aborted"; exit;;
-          * ) echo "Please answer yes or no to proceed or cancel";;
-      esac
-    done
-  fi
   while true; do
     echo -n "GitHub Access token: "
     read -s PAT_TOKEN || exit
@@ -73,7 +63,6 @@ Prompt_User (){
 # Access should be for just reading the repo. Not full private repo scope for a user.
 # It is not very secure to send out the pat token like this
 Download_Archive() {
-  mkdir -p "${WORKING_DIRECTORY}"
   curl -L \
   -H "Accept: application/vnd.github+json" \
   -H "Authorization: Bearer ${PAT_TOKEN}" \
@@ -99,29 +88,32 @@ Restore_Laravel_Dot_Env() {
 }
 
 Deploy() {
-  [[ -d "${SITE_LOC}" ]] && echo "Recreating ${SITE_LOC}"
-  rm -rf "${SITE_LOC}" &&
-  mkdir "${SITE_LOC}" &&
-  tar -xvf "${ARCHIVE_FILE}" --strip-components=1 --directory="${SITE_LOC}" &&
-  echo -e "The site archive has been extracted and moved to ${SITE_LOC}"
+  SITE_DIR="${SITE_DIR}/${GIT_TAG}"
+  ARCHIVE_FILE="${SITE_DIR}/site_archive_${GIT_TAG}"
+  mkdir -p "${SITE_LOC}" 
+  tar -xvf "${ARCHIVE_FILE}" --strip-components=1 --directory="${SITE_DIR}" &&
+  echo -e "The site archive has been extracted and moved to ${SITE_DIR}"
+  # TODO: remove and recreate .env symlink
+  # TODO: remove and recreate storage symlink
+  # TODO: remove and recreate site symlink
 }
 
 Cleanup() {
   trap '' 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
 
-  [[ -d "${WORKING_DIRECTORY}" && "${WORKING_DIRECTORY}" != "${HOME}" ]] && 
-  rm -rf "${WORKING_DIRECTORY}"
+  #[[ -d "${WORKING_DIRECTORY}" && "${WORKING_DIRECTORY}" != "${HOME}" ]] && 
+  #rm -rf "${WORKING_DIRECTORY}"
 
-  [[ -f "${SITE_LOC}/.env_${TIMESTAMP}.." ]] &&
-  rm "${SITE_LOC}/.env_${TIMESTAMP}.."
+  #[[ -f "${SITE_LOC}/.env_${TIMESTAMP}.." ]] &&
+  #rm "${SITE_LOC}/.env_${TIMESTAMP}.."
 }
 
 Main() {
   Prompt_User
   Download_Archive
-  Backup_Laravel_Dot_Env
+  #Backup_Laravel_Dot_Env
   Deploy
-  Restore_Laravel_Dot_Env
+  #Restore_Laravel_Dot_Env
 }
 # BEGIN: FUNCTIONS
 
