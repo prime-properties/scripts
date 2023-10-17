@@ -10,22 +10,26 @@
 # Notes:
 # Requires a github PAT, repo tag
 #
-
-
-# BEGIN: INITIALIZATION CODE, set traps, define and set globals, etc
-set -Eeou pipefail
-trap Cleanup 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
-SITE_NAME="test-app"
-SITE_DIR="/opt/laravel/${SITE_NAME}"
-SITE_SYMLINK="/var/www/prime-properties/${SITE_NAME}"
-#TIMESTAMP="$(date +%s)"
-ARCHIVE_FILE="${SITE_DIR}/site_archive_${TIMESTAMP}"
-PAT_TOKEN=
-GIT_TAG=
-# END: INITIALIZATION CODE
-
+# TODO: deal with storage so existing storage is not lost with a new deployment
 # BEGIN: FUNCTIONS
-Prompt_User (){
+
+# Init()
+# Define and set globals, get user input and create required directories if needed
+# Call first!
+Init (){
+  set -Eeou pipefail
+  trap Cleanup 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
+  
+  ORIG_DIR="$(pwd)"
+  SITE_NAME="test-app"
+  BASE_DIR="/opt/laravel/${SITE_NAME}"
+  RELEASES_DIR="${BASE_DIR}/releases"
+  SITE_SYMLINK="/var/www/prime-properties/${SITE_NAME}/public"
+  ARCHIVE_FILE=
+  RELEASE_DIR=
+  PAT_TOKEN=
+  GIT_TAG=
+  
   set -o posix # use POSIX mode so SIGINT can be traped when looping a read command
   while true; do
     echo -n "GitHub Access token: "
@@ -57,6 +61,21 @@ Prompt_User (){
   done
   echo
   set +o posix # return to default mode
+  
+  RELEASE_DIR="${RELEASES_DIR}/${GIT_TAG}"
+  ARCHIVE_FILE="${RELEASES_DIR}/site_archive_${GIT_TAG}"
+
+  [[ -d "${RELEASE_DIR}" ]] && 
+  echo "A release for ${TAG} seems to already exist. Run rm -rf ${RELEASE_DIR} and try again." &&
+  echo "Script aborted"
+
+  [[ -f "${ARCHIVE_FILE}" ]] && 
+  echo "${ARCHIVE_FILE} already exists. Run rm -rf ${ARCHIVE_FILE} and try again." &&
+  echo "Script aborted"
+
+  mkdir -p "${BASE_DIR}" && 
+  mkdir -p "${RELEASES_DIR}" &&
+  mkdir -p "${BASE_DIR}/storage"
 }
 
 # TODO: change this to use a deploy key since the provisioning repo is from an organization.
@@ -71,28 +90,42 @@ Download_Archive() {
   > "${ARCHIVE_FILE}"
 }
 
-Backup_Laravel_Dot_Env() {
-  local src="${SITE_LOC}/.env"
-  local dest="$(dirname "${SITE_LOC}")/.env_${TIMESTAMP}"
+# Set_Symlinks()
+# Must be called after Deploy()
+Set_Symlinks() {
+  # Symbolic link from release to webroot
+  ln -sf "${RELEASE_DIR}/public" "${SITE_SYMLINK}" && echo "Symlinked ${RELEASE_DIR}/public TO ${SITE_SYMLINK}"
 
-  [[ -f "${src}" ]] || return 0 
-  cp "${src}" "${dest}" && echo "Backed up ${src} to ${dest}"
+  # Symbolic link to .env file
+  [[ ! -f "${BASE_DIR}/.env" ]] &&
+  echo "${BASE_DIR}/.env does not exist so a new .env file will be created there from ${RELEASE_DIR}/.env.example" &&
+  echo "You will need to edit ${BASE_DIR}/.env which will be symlinked to ${RELEASE_DIR}/.env" &&
+  cp "${RELEASE_DIR}/.env.example" "${BASE_DIR}/.env"
+  ln -sf "${BASE_DIR}/.env" "${RELEASE_DIR}/.env" && echo "Symlinked ${BASE_DIR}/.env TO ${RELEASE_DIR}/.env"
+
+  # TODO: Symbolic link to storage
+  
 }
 
-Restore_Laravel_Dot_Env() {
-  local src="$(dirname "${SITE_LOC}")/.env_${TIMESTAMP}"
-  local dest="${SITE_LOC}/.env"
+#Backup_Laravel_Dot_Env() {
+#  local src="${SITE_LOC}/.env"
+#  local dest="$(dirname "${SITE_LOC}")/.env_${TIMESTAMP}"
 
-  [[ -f "${src}" ]] || return 0
-  mv "${src}" "${dest}" && echo "Restored ${src} to ${dest}"
-}
+#  [[ -f "${src}" ]] || return 0 
+#  cp "${src}" "${dest}" && echo "Backed up ${src} to ${dest}"
+#}
+
+#Restore_Laravel_Dot_Env() {
+#  local src="$(dirname "${SITE_LOC}")/.env_${TIMESTAMP}"
+#  local dest="${SITE_LOC}/.env"
+
+#  [[ -f "${src}" ]] || return 0
+#  mv "${src}" "${dest}" && echo "Restored ${src} to ${dest}"
+#}
 
 Deploy() {
-  SITE_DIR="${SITE_DIR}/${GIT_TAG}"
-  ARCHIVE_FILE="${SITE_DIR}/site_archive_${GIT_TAG}"
-  mkdir -p "${SITE_LOC}" 
-  tar -xvf "${ARCHIVE_FILE}" --strip-components=1 --directory="${SITE_DIR}" &&
-  echo -e "The site archive has been extracted and moved to ${SITE_DIR}"
+  tar -xf "${ARCHIVE_FILE}" --strip-components=1 --directory="${RELEASE_DIR}" &&
+  echo -e "${ARCHIVE_FILE} has been extracted to ${RELEASE_DIR}"
   # TODO: remove and recreate .env symlink
   # TODO: remove and recreate storage symlink
   # TODO: remove and recreate site symlink
@@ -100,6 +133,7 @@ Deploy() {
 
 Cleanup() {
   trap '' 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
+  cd "${ORIG_DIR}"
 
   #[[ -d "${WORKING_DIRECTORY}" && "${WORKING_DIRECTORY}" != "${HOME}" ]] && 
   #rm -rf "${WORKING_DIRECTORY}"
@@ -108,17 +142,15 @@ Cleanup() {
   #rm "${SITE_LOC}/.env_${TIMESTAMP}.."
 }
 
-Main() {
-  Prompt_User
-  Download_Archive
-  #Backup_Laravel_Dot_Env
-  Deploy
-  #Restore_Laravel_Dot_Env
+Success_Message() {
+  local repo_url="https://github.com/prime-properties/prime-properties-example-stack"
+  echo "SUCCESS"
+  echo "Tag ${GIT_TAG} from the repository at ${repo_url} has been deployed to ${SITE_LOC}"
 }
-# BEGIN: FUNCTIONS
+
+Main() {
+  Init && Download_Archive && Deploy && Success_Message
+}
+# END: FUNCTIONS
 
 Main
-# Show Success if we make it this far
-repo_url="https://github.com/prime-properties/prime-properties-example-stack"
-echo "SUCCESS"
-echo "Tag ${GIT_TAG} of the repo ${repo_url} has been deployed to ${SITE_LOC}"
