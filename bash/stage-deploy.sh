@@ -18,6 +18,7 @@
 # Call first!
 Init (){
   set -Eeou pipefail
+  [[ $EUID -ne 0 ]] && echo -e "Script must be run as root\nTry: sudo bash stage-deploy.sh" && exit 1
   trap Cleanup 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
   
   ORIG_DIR="$(pwd)"
@@ -61,17 +62,21 @@ Init (){
   done
   echo
   set +o posix # return to default mode
+
+  # TEMP FOR TESTING
+  PAT_TOKEN="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"
+  GIT_TAG="deploy1-test"
   
   RELEASE_DIR="${RELEASES_DIR}/${GIT_TAG}"
-  ARCHIVE_FILE="${RELEASES_DIR}/site_archive_${GIT_TAG}"
+  ARCHIVE_FILE="${RELEASES_DIR}/site_archive_${GIT_TAG}.tar"
 
   [[ -d "${RELEASE_DIR}" ]] && 
-  echo "A release for ${TAG} seems to already exist. Run rm -rf ${RELEASE_DIR} and try again." &&
-  echo "Script aborted"
+  echo "A release for ${TAG} seems to already exist. Run: sudo rm -rf ${RELEASE_DIR} and try again." &&
+  echo "Script aborted" && exit 1
 
   [[ -f "${ARCHIVE_FILE}" ]] && 
-  echo "${ARCHIVE_FILE} already exists. Run rm -rf ${ARCHIVE_FILE} and try again." &&
-  echo "Script aborted"
+  echo "${ARCHIVE_FILE} already exists. Run: sudo rm -rf ${ARCHIVE_FILE} and try again." &&
+  echo "Script aborted" && exit 1
 
   mkdir -p "${BASE_DIR}" && 
   mkdir -p "${RELEASES_DIR}" &&
@@ -134,6 +139,7 @@ Deploy() {
 Cleanup() {
   trap '' 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
   cd "${ORIG_DIR}"
+  #[[ -f "${ARCHIVE_FILE}" ]] && rm "${ARCHIVE_FILE}"
 
   #[[ -d "${WORKING_DIRECTORY}" && "${WORKING_DIRECTORY}" != "${HOME}" ]] && 
   #rm -rf "${WORKING_DIRECTORY}"
@@ -144,8 +150,7 @@ Cleanup() {
 
 Success_Message() {
   local repo_url="https://github.com/prime-properties/prime-properties-example-stack"
-  echo "SUCCESS"
-  echo "Tag ${GIT_TAG} from the repository at ${repo_url} has been deployed to ${SITE_LOC}"
+  echo "SUCCESS: tag ${GIT_TAG} from ${repo_url} has been deployed"
 }
 
 Main() {
