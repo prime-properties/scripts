@@ -20,12 +20,19 @@ Init (){
   set -Eeou pipefail
   [[ $EUID -ne 0 ]] && echo -e "Script must be run as root\nTry: sudo bash stage-deploy.sh" && exit 1
   trap Cleanup 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
+
+  # Since we use nvm this seems to be required to use node in this shell since 
+  # the way this script is invoked (via bash) would bypass ~/.bashrc
+  export NVM_DIR="$HOME/.nvm"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+  [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
   
   ORIG_DIR="$(pwd)"
   SITE_NAME="test-app"
   BASE_DIR="/opt/laravel/${SITE_NAME}"
   RELEASES_DIR="${BASE_DIR}/releases"
-  SITE_SYMLINK="/var/www/prime-properties/${SITE_NAME}/public"
+  SITE_SYMLINK_DIR="/var/www/prime-properties/${SITE_NAME}"
+  SITE_SYMLINK="${SITE_SYMLINK_DIR}/public"
   ARCHIVE_FILE=
   RELEASE_DIR=
   PAT_TOKEN=
@@ -64,20 +71,20 @@ Init (){
   set +o posix # return to default mode
 
   # TEMP FOR TESTING
-  PAT_TOKEN="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"
-  GIT_TAG="deploy1-test"
+  #PAT_TOKEN=
+  #GIT_TAG=
   
   RELEASE_DIR="${RELEASES_DIR}/${GIT_TAG}"
   ARCHIVE_FILE="${RELEASES_DIR}/site_archive_${GIT_TAG}.tar"
 
-  [[ -d "${RELEASE_DIR}" ]] && 
-  echo "A release for ${TAG} seems to already exist. Run: sudo rm -rf ${RELEASE_DIR} and try again." &&
-  echo "Script aborted" && exit 1
+  #[[ -d "${RELEASE_DIR}" ]] && 
+  #echo "A release for ${GIT_TAG} seems to already exist. Run: sudo rm -rf ${RELEASE_DIR} and try again." &&
+  #echo "Script aborted" && exit 1
 
-  [[ -f "${ARCHIVE_FILE}" ]] && 
-  echo "${ARCHIVE_FILE} already exists. Run: sudo rm -rf ${ARCHIVE_FILE} and try again." &&
-  echo "Script aborted" && exit 1
-
+  #[[ -f "${ARCHIVE_FILE}" ]] && 
+  #echo "${ARCHIVE_FILE} already exists. Run: sudo rm -rf ${ARCHIVE_FILE} and try again." &&
+  #echo "Script aborted" && exit 1
+  mkdir -p "${SITE_SYMLINK_DIR}" &&
   mkdir -p "${BASE_DIR}" && 
   mkdir -p "${RELEASES_DIR}" &&
   mkdir -p "${BASE_DIR}/storage"
@@ -93,6 +100,17 @@ Download_Archive() {
   -H "X-GitHub-Api-Version: 2022-11-28" \
   "https://api.github.com/repos/prime-properties/prime-properties-example-stack/tarball/${GIT_TAG}" \
   > "${ARCHIVE_FILE}"
+
+  # Fugly file checking
+  local check_file="$(file -bL --mime "${ARCHIVE_FILE}" | grep -o 'application/json')"
+  [[ $check_file == 'application/json' ]] && 
+  echo "Error downloading from GitHub" && cat -v "${ARCHIVE_FILE}" && exit 101
+  check_file="$(file -bL --mime "${ARCHIVE_FILE}" | grep -o 'text/plain')"
+  [[ $check_file == 'text/plain' ]] && 
+  echo "Error downloading from GitHub" && cat -v "${ARCHIVE_FILE}" && echo && exit 101
+
+  echo "Downloaded ${ARCHIVE_FILE} from GitHub"
+
 }
 
 # Set_Symlinks()
@@ -104,7 +122,7 @@ Set_Symlinks() {
   # Symbolic link to .env file
   [[ ! -f "${BASE_DIR}/.env" ]] &&
   echo "${BASE_DIR}/.env does not exist so a new .env file will be created there from ${RELEASE_DIR}/.env.example" &&
-  echo "You will need to edit ${BASE_DIR}/.env which will be symlinked to ${RELEASE_DIR}/.env" &&
+  echo "Before starting the app, you will need to edit ${BASE_DIR}/.env which will be symlinked to ${RELEASE_DIR}/.env" &&
   cp "${RELEASE_DIR}/.env.example" "${BASE_DIR}/.env"
   ln -sf "${BASE_DIR}/.env" "${RELEASE_DIR}/.env" && echo "Symlinked ${BASE_DIR}/.env TO ${RELEASE_DIR}/.env"
 
@@ -112,49 +130,71 @@ Set_Symlinks() {
   
 }
 
-#Backup_Laravel_Dot_Env() {
-#  local src="${SITE_LOC}/.env"
-#  local dest="$(dirname "${SITE_LOC}")/.env_${TIMESTAMP}"
-
-#  [[ -f "${src}" ]] || return 0 
-#  cp "${src}" "${dest}" && echo "Backed up ${src} to ${dest}"
-#}
-
-#Restore_Laravel_Dot_Env() {
-#  local src="$(dirname "${SITE_LOC}")/.env_${TIMESTAMP}"
-#  local dest="${SITE_LOC}/.env"
-
-#  [[ -f "${src}" ]] || return 0
-#  mv "${src}" "${dest}" && echo "Restored ${src} to ${dest}"
-#}
-
 Deploy() {
+  mkdir -p "${RELEASE_DIR}"
   tar -xf "${ARCHIVE_FILE}" --strip-components=1 --directory="${RELEASE_DIR}" &&
   echo -e "${ARCHIVE_FILE} has been extracted to ${RELEASE_DIR}"
-  # TODO: remove and recreate .env symlink
-  # TODO: remove and recreate storage symlink
-  # TODO: remove and recreate site symlink
+  # TODO chown all files as www for apache
+}
+
+Prompt_Start_App() {
+  set -o posix # use POSIX mode so SIGINT can be traped when looping a read command
+  while true; do
+    echo -n "Proceed with starting the Laravel app at ${RELEASE_DIR} [y]/[n]?: "
+    read yn || exit
+    case $yn in
+        [Yy]* ) break;;
+        [Nn]* ) exit;;
+        * ) echo "Please answer y to proceed or n to cancel";;
+    esac
+  done
+  echo
+  set +o posix # return to default mode
+}
+
+# nvm makes npm wierd because it was installed as root? Its wonly but it works when sourced and run as root
+Start_App() {
+  chown -R roadkill_admin:roadkill_admin "${RELEASE_DIR}"
+  cd "${RELEASE_DIR}" &&
+  sudo -u roadkill_admin composer install -o --no-interaction --no-dev &&
+  . ~/.nvm/nvm.sh &&
+  npm install &&
+  npm run build &&
+
+  # Run optimization commands for laravel
+  sudo -u roadkill_admin php artisan optimize &&
+  sudo -u roadkill_admin php artisan cache:clear &&
+  sudo -u roadkill_admin php artisan route:cache &&
+  sudo -u roadkill_admin php artisan view:clear &&
+  sudo -u roadkill_admin php artisan config:cache 
+}
+
+Msg_Success_Deploy() {
+  local repo_url="https://github.com/prime-properties/prime-properties-example-stack"
+  echo "SUCCESS: tag ${GIT_TAG} from ${repo_url} has been deployed"
+}
+
+# TODO: deal with taking down any running app so we dont have moe than one app running at a time. is this even needed?
+Msg_Success_App_Start() {
+  echo "SUCCESS: Laravel app is running at ${RELEASE_DIR}"
+  echo "Check server configs to make sure it is being served from the Symlink ${SITE_SYMLINK}"
 }
 
 Cleanup() {
   trap '' 0 1 2 3 13 15 # EXIT HUP SIGINT QUIT PIPE TERM
   cd "${ORIG_DIR}"
-  #[[ -f "${ARCHIVE_FILE}" ]] && rm "${ARCHIVE_FILE}"
-
-  #[[ -d "${WORKING_DIRECTORY}" && "${WORKING_DIRECTORY}" != "${HOME}" ]] && 
-  #rm -rf "${WORKING_DIRECTORY}"
-
-  #[[ -f "${SITE_LOC}/.env_${TIMESTAMP}.." ]] &&
-  #rm "${SITE_LOC}/.env_${TIMESTAMP}.."
-}
-
-Success_Message() {
-  local repo_url="https://github.com/prime-properties/prime-properties-example-stack"
-  echo "SUCCESS: tag ${GIT_TAG} from ${repo_url} has been deployed"
+  # TODO: remove archive file?
 }
 
 Main() {
-  Init && Download_Archive && Deploy && Success_Message
+  Init && 
+  Download_Archive && 
+  Deploy && 
+  Set_Symlinks && 
+  Msg_Success_Deploy &&
+  Prompt_Start_App &&
+  Start_App &&
+  Msg_Success_App_Start
 }
 # END: FUNCTIONS
 
